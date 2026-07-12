@@ -1,6 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "::group::Starting wing gateway"
+
+wing start 2>&1 || true
+
+# Wait for gateway port to become reachable
+HOST="127.0.0.1"
+PORT="32523"
+MAX_WAIT=30
+WAITED=0
+
+while ! (echo > /dev/tcp/${HOST}/${PORT}) 2>/dev/null; do
+  if [[ ${WAITED} -ge ${MAX_WAIT} ]]; then
+    echo "::error::Gateway did not become reachable within ${MAX_WAIT}s"
+    # Show gateway log for diagnosis
+    GW_LOG="${HOME}/.wing/tui/gateway.log"
+    if [[ ! -f "${GW_LOG}" ]]; then
+      GW_LOG="${HOME}/.wing/gateway.log"
+    fi
+    if [[ -f "${GW_LOG}" ]]; then
+      echo "::group::Gateway log (last 30 lines)"
+      tail -30 "${GW_LOG}"
+      echo "::endgroup::"
+    fi
+    exit 1
+  fi
+  sleep 1
+  WAITED=$((WAITED + 1))
+done
+
+echo "✓ Gateway ready (${WAITED}s)"
+echo "::endgroup::"
+
 echo "::group::Preparing wing execution"
 
 # Build wing command
@@ -70,7 +102,6 @@ fi
 if [[ ${EXIT_CODE} -ne 0 ]]; then
   echo "::error::wing execution failed with exit code ${EXIT_CODE}"
   if [[ -n "${ERROR_MSG}" ]]; then
-    # Print last 20 lines of stderr for quick diagnosis
     echo "::group::wing stderr (last 20 lines)"
     echo "${ERROR_MSG}" | tail -20
     echo "::endgroup::"
