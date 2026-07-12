@@ -53,11 +53,6 @@ inputs:
     required: false
     default: '500'
 
-  timeout_minutes:
-    description: 'Maximum execution time in minutes.'
-    required: false
-    default: '60'
-
 outputs:
   result:
     description: 'The final text output from wing-agent.'
@@ -130,7 +125,6 @@ runs:
 
     - name: Run wing
       id: run_wing
-      timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
       shell: bash
       env:
         WING_PROMPT: ${{ inputs.prompt }}
