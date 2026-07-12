@@ -1,0 +1,195 @@
+name: 'Wing Action'
+description: 'Run wing-agent in GitHub Actions — AI-powered autonomous agent for code review, refactoring, and more.'
+author: 'wing-agent'
+
+branding:
+  icon: 'code'
+  color: 'blue'
+
+inputs:
+  app_id:
+    description: 'GitHub App ID. Store as a repository variable (e.g., vars.WING_APP_ID).'
+    required: true
+
+  app_private_key:
+    description: 'GitHub App private key (PEM format). Store as a repository secret (e.g., secrets.WING_APP_PRIVATE_KEY).'
+    required: true
+
+  llm_api_key:
+    description: 'LLM API key for the OpenAI-compatible endpoint.'
+    required: true
+
+  prompt:
+    description: 'Instructions for wing (passed to -p flag). This is the dynamic user message.'
+    required: true
+
+  system_prompt:
+    description: 'Replace the default system prompt entirely. Mutually exclusive with append_system_prompt.'
+    required: false
+    default: ''
+
+  append_system_prompt:
+    description: 'Append additional instructions to the system prompt.'
+    required: false
+    default: ''
+
+  llm_base_url:
+    description: 'Base URL for the OpenAI-compatible API endpoint.'
+    required: false
+    default: 'https://api.openai.com/v1'
+
+  model:
+    description: 'Model name override. When empty, uses the default agent model.'
+    required: false
+    default: ''
+
+  wing_version:
+    description: 'Specific version of wing-agent to install. Empty means latest.'
+    required: false
+    default: ''
+
+  max_turns:
+    description: 'Maximum agent loop turns to prevent runaway execution.'
+    required: false
+    default: '500'
+
+  timeout_minutes:
+    description: 'Maximum execution time in minutes.'
+    required: false
+    default: '60'
+
+outputs:
+  result:
+    description: 'The final text output from wing-agent.'
+    value: ${{ steps.run_wing.outputs.result }}
+
+  error:
+    description: 'Error message from wing if the execution failed.'
+    value: ${{ steps.run_wing.outputs.error }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install wing CLI
+      shell: bash
+      env:
+        WING_VERSION: ${{ inputs.wing_version }}
+        WING_HOME_DIR: ${{ runner.temp }}/wing-home
+      run: |
+        bash "${GITHUB_ACTION_PATH}/scripts/install-wing.sh"
+
+    - name: Generate GitHub App token
+      id: app_token
+      uses: actions/create-github-app-token@v3
+      with:
+        app-id: ${{ inputs.app_id }}
+        private-key: ${{ inputs.app_private_key }}
+
+    - name: Configure auth and git identity
+      shell: bash
+      env:
+        APP_TOKEN: ${{ steps.app_token.outputs.token }}
+        APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
+        APP_ID: ${{ inputs.app_id }}
+      run: |
+        set -euo pipefail
+
+        # Mask the token in all log output
+        echo "::add-mask::${APP_TOKEN}"
+
+        # Make token available to subsequent steps via GITHUB_ENV
+        echo "GH_TOKEN=${APP_TOKEN}" >> "${GITHUB_ENV}"
+
+        # Isolate wing HOME to runner.temp
+        WING_HOME_DIR="${RUNNER_TEMP}/wing-home"
+        echo "WING_HOME_DIR=${WING_HOME_DIR}" >> "${GITHUB_ENV}"
+        echo "HOME=${WING_HOME_DIR}" >> "${GITHUB_ENV}"
+        mkdir -p "${WING_HOME_DIR}"
+
+        # Configure git identity using the App bot
+        BOT_NAME="${APP_SLUG}[bot]"
+        BOT_EMAIL="${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
+        git config user.name "${BOT_NAME}"
+        git config user.email "${BOT_EMAIL}"
+
+        echo "✓ Git identity: ${BOT_NAME}"
+
+    - name: Setup wing config
+      shell: bash
+      env:
+        LLM_API_KEY: ${{ inputs.llm_api_key }}
+        LLM_BASE_URL: ${{ inputs.llm_base_url }}
+        MODEL: ${{ inputs.model }}
+      run: |
+        bash "${GITHUB_ACTION_PATH}/scripts/setup-wing-config.sh"
+
+    - name: Run wing
+      id: run_wing
+      timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
+      shell: bash
+      env:
+        WING_PROMPT: ${{ inputs.prompt }}
+        WING_SYSTEM_PROMPT: ${{ inputs.system_prompt }}
+        WING_APPEND_SYSTEM_PROMPT: ${{ inputs.append_system_prompt }}
+        WING_MAX_TURNS: ${{ inputs.max_turns }}
+        WING_GITHUB_ACTION_PATH: ${{ github.action_path || '' }}
+      run: |
+        bash "${GITHUB_ACTION_PATH}/scripts/run-wing.sh"
+
+    - name: Debug trace
+      if: ${{ always() && runner.debug == '1' }}
+      shell: bash
+      env:
+        WING_OUTPUT_FILE: ${{ steps.run_wing.outputs.output_file }}
+        WING_ERROR: ${{ steps.run_wing.outputs.error }}
+      run: |
+        set -euo pipefail
+
+        redact_stream() {
+          sed -E \
+            -e 's|github_pat_[A-Za-z0-9_]+|[REDACTED_GITHUB_PAT]|g' \
+            -e 's|gh[pousr]_[A-Za-z0-9_]{20,}|[REDACTED_GITHUB_TOKEN]|g' \
+            -e 's|sk-[A-Za-z0-9_-]{20,}|[REDACTED_API_KEY]|g' \
+            -e 's|Bearer [A-Za-z0-9._~+/-]{20,}|Bearer [REDACTED]|g' \
+            -e 's|A[KS]IA[0-9A-Z]{16}|[REDACTED_AWS_KEY]|g'
+        }
+
+        echo "::group::Wing raw output trace"
+        if [[ -n "${WING_OUTPUT_FILE}" && -f "${WING_OUTPUT_FILE}" ]]; then
+          echo "Output file: ${WING_OUTPUT_FILE}"
+          echo "Output bytes: $(wc -c < "${WING_OUTPUT_FILE}")"
+          redact_stream < "${WING_OUTPUT_FILE}"
+        else
+          echo "No wing output file found."
+        fi
+        echo "::endgroup::"
+
+        if [[ -n "${WING_ERROR}" ]]; then
+          echo "::group::Wing stderr"
+          printf '%s\n' "${WING_ERROR}" | redact_stream
+          echo "::endgroup::"
+        fi
+
+    - name: Cleanup sensitive state
+      if: always()
+      shell: bash
+      run: |
+        set +e
+
+        # Reset git remote to remove any embedded token
+        git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git" 2>/dev/null || true
+
+        # Clean up isolated wing HOME
+        WING_HOME_DIR="${RUNNER_TEMP}/wing-home"
+        if [[ -d "${WING_HOME_DIR}" ]]; then
+          rm -rf "${WING_HOME_DIR}"
+          echo "✓ Cleaned up wing home: ${WING_HOME_DIR}"
+        fi
+
+        # Clean up wing config
+        rm -rf "${HOME}/.wing" 2>/dev/null || true
