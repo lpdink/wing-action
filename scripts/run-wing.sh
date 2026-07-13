@@ -36,7 +36,7 @@ echo "::endgroup::"
 echo "::group::Preparing wing execution"
 
 # Build wing command
-WING_ARGS=(-p "${WING_PROMPT}" --yolo --max-turns "${WING_MAX_TURNS}")
+WING_ARGS=(-p "${WING_PROMPT}" --yolo --max-turns "${WING_MAX_TURNS}" --output-format stream-json)
 
 # System prompt: --system-prompt replaces, --append-system-prompt appends
 if [[ -n "${WING_SYSTEM_PROMPT:-}" ]]; then
@@ -60,16 +60,16 @@ ERROR_FILE="$(mktemp /tmp/wing-error-XXXXXX.log)"
 echo "::group::Running wing"
 
 set +e
-wing "${WING_ARGS[@]}" >"${OUTPUT_FILE}" 2>"${ERROR_FILE}"
-EXIT_CODE=$?
+wing "${WING_ARGS[@]}" 2>"${ERROR_FILE}" | tee "${OUTPUT_FILE}"
+EXIT_CODE=${PIPESTATUS[0]}
 set -e
 
 echo "::endgroup::"
 
-# Read outputs
+# Read outputs — extract final result text from the last NDJSON line ({"type":"result",...})
 RESULT=""
 if [[ -s "${OUTPUT_FILE}" ]]; then
-  RESULT="$(cat "${OUTPUT_FILE}")"
+  RESULT="$(tail -1 "${OUTPUT_FILE}" | jq -r '.result // empty' 2>/dev/null || true)"
 fi
 
 ERROR_MSG=""
