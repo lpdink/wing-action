@@ -106,7 +106,7 @@ if [[ ${EXIT_CODE} -ne 0 ]]; then
     echo "${ERROR_MSG}" | tail -20
     echo "::endgroup::"
   fi
-  exit ${EXIT_CODE}
+  exit "${EXIT_CODE}"
 fi
 
 echo "✓ Wing execution complete"
