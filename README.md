@@ -77,7 +77,7 @@ Open a Pull Request and watch your bot in action! 🎉
 | `system_prompt` | Replace the system prompt entirely. | No | — |
 | `append_system_prompt` | Append instructions to the system prompt. | No | — |
 | `llm_base_url` | OpenAI-compatible API base URL. | No | `https://api.openai.com/v1` |
-| `model` | Model name override. | No | *(wing config default)* |
+| `model` | Model the agent runs on, declared in the provider model catalog. | No | `gpt-4o` |
 | `wing_version` | wing-agent pip version. Empty = latest. | No | *(latest)* |
 | `max_turns` | Maximum agent loop turns. | No | `500` |
 | `timeout_minutes` | Maximum execution time in minutes. | No | `60` |
@@ -101,7 +101,7 @@ Open a Pull Request and watch your bot in action! 🎉
 1. **Install wing CLI** — `pip install wing-agent`
 2. **Authenticate** — Generate installation token via `actions/create-github-app-token@v3`
 3. **Isolate** — Set `HOME` to `${{ runner.temp }}/wing-home` to avoid polluting the runner
-4. **Configure** — Write `~/.wing/core/config.yaml` with LLM credentials and tool registrations
+4. **Configure** — Write `~/.wing/core/config.yaml` with the LLM provider, its model catalog and the agent
 5. **Execute** — Run `wing -p "<prompt>" --append-system-prompt "<instructions>" --yolo --max-turns N`
 6. **Cleanup** — Reset git remote, remove isolated HOME and config (runs `if: always()`)
 
