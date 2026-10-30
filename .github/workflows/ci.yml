@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The action installs wing-agent from PyPI at run time, so a new wing release
+  # can break it without a commit here. The config guard below re-validates the
+  # generated config against the latest release every week.
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
 
 jobs:
   lint:
@@ -22,3 +28,45 @@ jobs:
 
       - name: Lint YAML files
         run: yamllint -d relaxed action.yml examples/*.yml
+
+  # Guards the config the action writes against the wing version users actually
+  # get (latest from PyPI). wing >= 0.7.0 derives the model catalog from
+  # configuration alone, so a provider without `providers[].models` boots the
+  # gateway in setup mode and `wing` refuses to start a session — the action dies
+  # with exit 78 before review even begins. `wing config doctor` asks the same
+  # preflight the CLI asks, which is why it is the assertion here.
+  config-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install wing-agent (latest release)
+        run: pip install wing-agent
+
+      - name: Generate the config the action writes
+        env:
+          HOME: ${{ runner.temp }}/wing-home
+          LLM_BASE_URL: https://api.openai.com/v1
+          LLM_API_KEY: sk-config-guard-not-a-real-key
+          # A model name with YAML metacharacters: quoting must survive.
+          MODEL: "Qwen/Qwen3.5:32B"
+        run: |
+          mkdir -p "${HOME}"
+          bash scripts/setup-wing-config.sh
+
+      - name: Validate it with the real gateway
+        env:
+          HOME: ${{ runner.temp }}/wing-home
+        run: |
+          wing start
+          wing config doctor
+
+      - name: Stop the gateway
+        if: always()
+        env:
+          HOME: ${{ runner.temp }}/wing-home
+        run: wing stop || true

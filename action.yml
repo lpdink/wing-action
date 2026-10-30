@@ -39,7 +39,7 @@ inputs:
     default: 'https://api.openai.com/v1'
 
   model:
-    description: 'Model name override. When empty, uses the default agent model.'
+    description: 'Model the agent runs on, declared in the provider model catalog. Empty falls back to gpt-4o.'
     required: false
     default: ''
 

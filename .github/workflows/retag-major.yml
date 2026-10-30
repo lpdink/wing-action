@@ -1,0 +1,27 @@
+name: Move the major tag
+
+# Consumers pin `lpdink/wing-action@v1`, a moving major tag. Keeping it equal to
+# `main` used to be a manual step after every merge, and forgetting it leaves
+# consumers silently running old code — the action then looks healthy while it
+# writes a config from months ago. Moving the tag here makes `main` == `v1` a
+# property of the repository instead of a convention.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Point v1 at the pushed commit
+        run: |
+          git tag -f v1
+          git push -f origin refs/tags/v1
